@@ -4,8 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#000000">
-  <title>Chess Online</title>
+  <title>Mini Game Online</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  
+  <link rel="manifest" href="/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GoomysGames">
+
   <link rel="stylesheet" href="/css/variables.css">
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/layout.css">
@@ -19,19 +25,32 @@
         <path d="M9 3l1.5 4.5L9 9l3 2-2 2 2 4h4l-2-4 2-2-3-2 1.5-1.5L15 3z"/>
         <path d="M7 20h10"/>
       </svg>
-      <span>Chess Online</span>
+      <span>GoomysGames</span>
     </div>
-    <button id="theme-toggle" class="icon-button" aria-label="Toggle theme" title="Toggle theme">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="4"/>
-        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-      </svg>
-    </button>
+    <div class="header-actions">
+      <button id="mute-toggle" class="icon-button" aria-label="Toggle sound" title="Toggle sound">
+        <svg id="icon-sound-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+        <svg id="icon-sound-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <line x1="23" y1="9" x2="17" y2="15"></line>
+          <line x1="17" y1="9" x2="23" y2="15"></line>
+        </svg>
+      </button>
+      <button id="theme-toggle" class="icon-button" aria-label="Toggle theme" title="Toggle theme">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <main id="view-lobby" class="view active">
     <div class="container">
-      <h1 class="hero-title">Play chess online.</h1>
+      <h1 class="hero-title">Play Games Online.</h1>
       <p class="hero-sub">Private rooms. Authoritative rules. No account required.</p>
       <div class="lobby-grid">
         <section class="card">
@@ -41,6 +60,13 @@
               <span class="field-label">Display name</span>
               <input type="text" id="create-name" maxlength="20" placeholder="Your name" required>
             </label>
+            <div class="field">
+              <span class="field-label">Game</span>
+              <div class="segmented" role="group" id="game-type" aria-label="Game Type">
+                <button type="button" data-value="chess" class="active">Chess</button>
+                <button type="button" data-value="tictactoe">Tic-Tac-Toe</button>
+              </div>
+            </div>
             <div class="field">
               <span class="field-label">Time control</span>
               <div class="segmented" role="group" id="time-control" aria-label="Time control">
@@ -96,7 +122,8 @@
           <div class="clock" data-clock>—</div>
         </div>
         <div class="board-wrap">
-          <div id="board" class="board" role="grid" aria-label="Chessboard"></div>
+          <div id="board-chess" class="board" role="grid" aria-label="Chessboard"></div>
+          <div id="board-tictactoe" class="tictactoe-board" style="display: none;"></div>
         </div>
         <div class="player-bar" id="player-bottom">
           <div class="player-info">
@@ -134,6 +161,23 @@
           <button class="button small" id="btn-flip">Flip board</button>
           <button class="button small" id="btn-claim-draw" hidden>Claim draw</button>
           <button class="button small primary" id="btn-rematch" hidden>Rematch</button>
+        </div>
+
+        <div class="chat-section">
+          <div class="section-head">
+            <h3>Quick Chat <span id="spectator-count" style="font-size: 11px; color: var(--text-tertiary);"></span></h3>
+          </div>
+          <div class="chat-box" id="chat-messages">
+            <div class="chat-sys">Welcome to the room!</div>
+          </div>
+          <div class="quick-chat-grid">
+            <button class="button tiny ghost" data-msg="Nice move!">Nice move</button>
+            <button class="button tiny ghost" data-msg="Good game!">Good game</button>
+            <button class="button tiny ghost" data-msg="Oops!">Oops</button>
+            <button class="button tiny ghost" data-msg="Good luck!">Good luck</button>
+            <button class="button tiny ghost" data-msg="Thinking...">Thinking...</button>
+            <button class="button tiny ghost" data-msg="Wow!">Wow!</button>
+          </div>
         </div>
 
         <div class="history-section">

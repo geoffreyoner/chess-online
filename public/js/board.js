@@ -23,7 +23,12 @@ let pieceElements = {};
 export function getOrientation() { return orientation; }
 
 export function initBoard() {
-  boardEl = document.getElementById('board');
+  boardEl = document.getElementById('board-chess');
+  if (!boardEl) {
+    console.error('Elemen #board-chess tidak ditemukan!');
+    return;
+  }
+  
   boardEl.innerHTML = '';
   
   squaresLayer = document.createElement('div');
@@ -35,23 +40,36 @@ export function initBoard() {
   boardEl.appendChild(piecesLayer);
   
   squaresLayer.addEventListener('click', handleClick);
-  document.getElementById('btn-flip').addEventListener('click', flipBoard);
+  
+  const btnFlip = document.getElementById('btn-flip');
+  if (btnFlip) btnFlip.addEventListener('click', flipBoard);
 }
 
 export function setBoardState(snapshot) {
-  currentFen = snapshot.game.fen;
-  mySeat = snapshot.mySeat;
-  lastMove = snapshot.game.lastMove;
-  isCheck = snapshot.game.check;
-  interactive = snapshot.game.status === 'active';
-  
-  if (!initialized) {
-    if (mySeat === 'black') orientation = 'black';
-    initialized = true;
-  }
+  const newFen = snapshot.game.fen;
+  const newSeat = snapshot.mySeat;
+  const isNewGame = snapshot.game.history.length === 0;
   
   selectedSquare = null;
   legalTargets = [];
+
+  if (!initialized) {
+    if (newSeat === 'black') orientation = 'black';
+    initialized = true;
+  } else if (mySeat !== newSeat || isNewGame) {
+    if (mySeat !== newSeat && newSeat !== 'spectator') {
+      orientation = newSeat;
+    }
+    piecesLayer.innerHTML = '';
+    pieceElements = {};
+    window.dispatchEvent(new CustomEvent('board:flip'));
+  }
+
+  currentFen = newFen;
+  mySeat = newSeat;
+  lastMove = snapshot.game.lastMove;
+  isCheck = snapshot.game.check;
+  interactive = snapshot.game.status === 'active';
   
   renderSquares();
   renderPieces();
@@ -139,8 +157,9 @@ function renderSquares() {
 
 function renderPieces() {
   const boardArr = parseFen(currentFen);
+  const isNewGame = !lastMove || Object.keys(pieceElements).length === 0;
   
-  if (lastMove && lastMove.from && lastMove.to && Object.keys(pieceElements).length > 0) {
+  if (!isNewGame && lastMove) {
     const movingEl = pieceElements[lastMove.from];
     
     if (movingEl) {
@@ -249,19 +268,27 @@ function handleClick(e) {
   if (mySeat === 'spectator') return;
 
   if (selectedSquare && legalTargets.includes(square)) {
+    const from = selectedSquare;
+    const to = square;
+    
+    selectedSquare = null;
+    legalTargets = [];
+    renderSquares();
+
     const board = parseFen(currentFen);
-    const { file, rank } = squareToCoord(selectedSquare);
+    const { file, rank } = squareToCoord(from);
     const piece = board[rank][file];
-    const targetRank = parseInt(square[1], 10);
+    const targetRank = parseInt(to[1], 10);
     const isPawn = piece && piece.toLowerCase() === 'p';
     const isPromotion = isPawn && (
       (piece === 'P' && targetRank === 8) || (piece === 'p' && targetRank === 1)
     );
+    
     if (isPromotion) {
-      showPromotionDialog(selectedSquare, square);
+      showPromotionDialog(from, to);
       return;
     }
-    makeMove(selectedSquare, square);
+    makeMove(from, to);
     return;
   }
 
@@ -316,12 +343,6 @@ function makeMove(from, to, promotion) {
   getSocket().emit('game:move', { from, to, promotion, requestId }, (res) => {
     if (!res || !res.ok) {
       toast((res && res.error) || 'Move rejected', 'error');
-      selectedSquare = null;
-      legalTargets = [];
-      renderSquares();
-    } else {
-      selectedSquare = null;
-      legalTargets = [];
     }
   });
 }

@@ -3,6 +3,7 @@ const validation = require('../middleware/validation');
 const rateLimit = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
 const { AppError } = require('../utils/errors');
+const { getEngine } = require('../games');
 
 function sendErr(ack, err) {
   if (typeof ack === 'function') ack({ ok: false, error: err.message, code: err.code || 'ERROR' });
@@ -12,11 +13,13 @@ module.exports = function roomHandlers(io, socket) {
   socket.on('room:create', (payload, ack) => {
     try {
       rateLimit.check(socket, 'room:create');
-      const { name, timeControl } = validation.validateCreateRoom(payload);
-      const { room, token } = roomService.createRoom({ name, timeControl, socketId: socket.id });
+      const { name, timeControl, gameType } = validation.validateCreateRoom(payload);
+      const { room, token } = roomService.createRoom({ name, timeControl, gameType, socketId: socket.id });
       socket.join(room.code);
       roomService.broadcastState(io, room);
-      ack({ ok: true, roomCode: room.code, token, seat: 'white' });
+      if (typeof ack === 'function') {
+        ack({ ok: true, roomCode: room.code, token, seat: 'white', gameType: room.gameType });
+      }
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
       else { logger.error('room:create failed', err); sendErr(ack, { message: 'Internal error' }); }
@@ -29,6 +32,9 @@ module.exports = function roomHandlers(io, socket) {
       const { name, roomCode } = validation.validateJoinRoom(payload);
       const { room, token, seat } = roomService.joinRoom({ name, roomCode, socketId: socket.id });
       socket.join(room.code);
+      
+      io.to(room.code).emit('room:sysMessage', `${name} joined as ${seat}.`);
+      
       roomService.broadcastState(io, room);
       ack({ ok: true, roomCode: room.code, token, seat });
     } catch (err) {
@@ -43,6 +49,10 @@ module.exports = function roomHandlers(io, socket) {
       const { roomCode, token } = validation.validateReconnect(payload);
       const { room, seat } = roomService.reconnect({ roomCode, token, socketId: socket.id });
       socket.join(room.code);
+      
+      const player = seat === 'white' ? room.players.white : room.players.black;
+      if (player) io.to(room.code).emit('room:sysMessage', `${player.name} reconnected.`);
+
       roomService.broadcastState(io, room);
       ack({ ok: true, seat, snapshot: roomService.buildSnapshot(room, seat) });
     } catch (err) {
@@ -55,9 +65,9 @@ module.exports = function roomHandlers(io, socket) {
     try {
       const ctx = roomService.getContext(socket.id);
       if (ctx) {
-        // Player leaving an active game forfeits
         if ((ctx.seat === 'white' || ctx.seat === 'black') && ctx.room.game.status === 'active') {
-          require('../services/gameService').endGame(ctx.room, {
+          const engine = getEngine(ctx.room.gameType);
+          engine.endGame(ctx.room, {
             winner: ctx.seat === 'white' ? 'b' : 'w',
             reason: 'abandonment'
           });

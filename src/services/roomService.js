@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 const { AppError } = require('../utils/errors');
 const { generateRoomCode, generateToken, hashToken } = require('./tokenService');
 const timer = require('./timerService');
-const gameService = require('./gameService');
+const { getEngine } = require('../games');
 
 const rooms = new Map();
 const socketToRoom = new Map();
@@ -17,13 +17,15 @@ function generateUniqueCode() {
   throw new AppError('CODE_GEN_FAILED', 'Could not generate unique room code');
 }
 
-function createRoom({ name, timeControl, socketId }) {
+function createRoom({ name, timeControl, gameType = 'chess', socketId }) {
   const code = generateUniqueCode();
   const token = generateToken();
   const tokenHash = hashToken(token);
+  const engine = getEngine(gameType);
 
   const room = {
     code,
+    gameType,
     createdAt: Date.now(),
     lastActivity: Date.now(),
     players: {
@@ -31,7 +33,7 @@ function createRoom({ name, timeControl, socketId }) {
       black: null
     },
     spectators: new Map(),
-    game: gameService.newGame(),
+    game: engine.create(),
     timeControl: { initial: timeControl.initial, increment: timeControl.increment },
     clocks: {
       white: timeControl.initial * 1000,
@@ -65,7 +67,8 @@ function joinRoom({ name, roomCode, socketId }) {
     room.players.black = { name, tokenHash, socketId, connected: true };
     tokenInfo.set(tokenHash, { roomCode: room.code, seat: 'black', name });
     if (room.players.white) {
-      gameService.startGame(room);
+      const engine = getEngine(room.gameType);
+      engine.start(room);
     }
   } else {
     if (room.spectators.size >= 2) throw new AppError('ROOM_FULL', 'Room is full');
@@ -126,7 +129,8 @@ function removeSocket(socketId) {
       if (room.timeControl.initial === 0 && room.game.status === 'active') {
         room.disconnectTimers[seat] = setTimeout(() => {
           if (room.game.status === 'active' && !room.players[seat].connected) {
-            gameService.endGame(room, {
+            const engine = getEngine(room.gameType);
+            engine.endGame(room, {
               winner: seat === 'white' ? 'b' : 'w',
               reason: 'abandonment'
             });
@@ -161,8 +165,16 @@ function removeFromRoom(socketId) {
 
 function buildSnapshot(room, seat) {
   const clocks = timer.getCurrentClocks(room);
+  const engine = getEngine(room.gameType);
+  
+  let canClaimDraw = false;
+  if (engine.canClaimDraw) {
+    canClaimDraw = engine.canClaimDraw(room);
+  }
+
   return {
     roomCode: room.code,
+    gameType: room.gameType,
     version: room.game.version,
     mySeat: seat,
     players: {
@@ -172,19 +184,21 @@ function buildSnapshot(room, seat) {
     spectators: Array.from(room.spectators.values()).map(s => ({ name: s.name })),
     game: {
       status: room.game.status,
-      fen: room.game.chess.fen(),
-      turn: room.game.chess.turn(),
-      history: room.game.history,
-      lastMove: room.game.lastMove,
       result: room.game.result,
-      check: room.game.chess.in_check(),
-      checkmate: room.game.chess.in_checkmate(),
-      stalemate: room.game.chess.in_stalemate(),
-      canClaimDraw: gameService.canClaimDraw(room)
+      lastMove: room.game.lastMove,
+      drawOffer: room.game.drawOffer,
+      version: room.game.version,
+      canClaimDraw,
+      fen: room.game.chess ? room.game.chess.fen() : null,
+      turn: room.game.chess ? room.game.chess.turn() : room.game.turn,
+      history: room.game.history,
+      check: room.game.chess ? room.game.chess.in_check() : false,
+      checkmate: room.game.chess ? room.game.chess.in_checkmate() : false,
+      stalemate: room.game.chess ? room.game.chess.in_stalemate() : false,
+      board: room.game.board || null
     },
     timeControl: room.timeControl,
     clocks,
-    drawOffer: room.game.drawOffer,
     rematchVotes: room.rematchVotes
   };
 }
@@ -215,7 +229,20 @@ function declineRematch(room, seat) {
 }
 
 function resetForRematch(room) {
-  gameService.startGame(room);
+  if (room.players.white && room.players.black) {
+    const oldWhite = room.players.white;
+    const oldBlack = room.players.black;
+    room.players.white = oldBlack;
+    room.players.black = oldWhite;
+
+    const wHash = room.players.white.tokenHash;
+    const bHash = room.players.black.tokenHash;
+    if (tokenInfo.has(wHash)) tokenInfo.get(wHash).seat = 'white';
+    if (tokenInfo.has(bHash)) tokenInfo.get(bHash).seat = 'black';
+  }
+
+  const engine = getEngine(room.gameType);
+  engine.start(room);
 }
 
 function cleanup() {
@@ -241,7 +268,8 @@ function checkTimeouts(io) {
   for (const room of rooms.values()) {
     if (room.game.status !== 'active') continue;
     if (timer.isTimedOut(room)) {
-      const ended = gameService.handleTimeout(room);
+      const engine = getEngine(room.gameType);
+      const ended = engine.handleTimeout(room);
       if (ended) broadcastState(io, room);
     }
   }

@@ -1,3 +1,8 @@
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
 .button {
   display: inline-flex;
   align-items: center;
@@ -69,6 +74,13 @@
   transition: border-color var(--transition);
 }
 .field input:focus { outline: none; border-color: var(--text); }
+
+.input-group {
+  display: flex;
+  gap: var(--space-2);
+}
+.input-group input { flex: 1; min-width: 0; }
+.input-group .button { flex-shrink: 0; padding: 0 var(--space-3); }
 
 .segmented {
   display: flex;
@@ -167,7 +179,7 @@
   gap: var(--space-2);
 }
 
-.history-section, .invite-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.history-section, .invite-section, .chat-section { display: flex; flex-direction: column; gap: var(--space-2); }
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 .section-head h3 {
   font-size: 12px; font-weight: 600;
@@ -176,7 +188,7 @@
 }
 
 .history {
-  max-height: 240px;
+  max-height: 200px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -194,6 +206,55 @@
 .move { color: var(--text); }
 .move.empty { color: transparent; }
 .history .empty { color: var(--text-tertiary); font-family: var(--font-sans); font-style: italic; text-align: center; padding: var(--space-2); }
+
+.chat-box {
+  height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  background: var(--bg-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 13px;
+}
+
+.chat-msg {
+  line-height: 1.4;
+  word-break: break-word;
+}
+.chat-name {
+  font-weight: 600;
+  margin-right: 4px;
+}
+.chat-name.white { color: #fff; text-shadow: 0 0 2px #000; }
+.chat-name.black { color: var(--text-secondary); }
+.chat-name.spectator { color: var(--info); }
+
+.chat-sys {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: 11px;
+  text-align: center;
+  margin: 2px 0;
+}
+
+.quick-chat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.quick-chat-grid .button {
+  padding: 0 var(--space-1);
+  font-size: 11px;
+  height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
 
 .invite-row { display: flex; gap: var(--space-2); }
 .invite-row input {
@@ -300,19 +361,4 @@
   text-shadow: 0 4px 24px rgba(0,0,0,0.8);
   padding: 0 24px;
   line-height: 1.2;
-}
-
-.input-group {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.input-group input {
-  flex: 1;
-  min-width: 0;
-}
-
-.input-group .button {
-  flex-shrink: 0;
-  padding: 0 var(--space-3);
 }

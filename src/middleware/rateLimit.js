@@ -4,6 +4,7 @@ const LIMITS = {
   'room:create': { max: 5, windowMs: 60_000 },
   'room:join': { max: 12, windowMs: 60_000 },
   'room:reconnect': { max: 10, windowMs: 60_000 },
+  'room:chat': { max: 15, windowMs: 60_000 },
   'game:move': { max: 60, windowMs: 60_000 },
   'game:legalMoves': { max: 120, windowMs: 60_000 },
   'game:resign': { max: 3, windowMs: 60_000 },

@@ -1,9 +1,40 @@
+# Dependencies
 node_modules/
+
+# Environment (keep the example file tracked)
 .env
+.env.*
+!.env.example
+
+# Logs
 *.log
 npm-debug.log*
-.DS_Store
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+nohup.out
+
+# Test coverage
 coverage/
 .nyc_output/
+
+# Build output
 dist/
 build/
+
+# Archives (project snapshots)
+*.zip
+*.tgz
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+.node_repl_history

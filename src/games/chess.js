@@ -1,7 +1,7 @@
 const { Chess } = require('chess.js');
-const timer = require('./timerService');
+const timer = require('../services/timerService');
 
-function newGame() {
+function create() {
   return {
     status: 'waiting',
     chess: new Chess(),
@@ -13,13 +13,11 @@ function newGame() {
   };
 }
 
-function startGame(room) {
+function start(room) {
   const prevVersion = room.game ? room.game.version : 0;
-  
-  room.game = newGame();
+  room.game = create();
   room.game.status = 'active';
-  room.game.version = prevVersion + 1; 
-  
+  room.game.version = prevVersion + 1;
   room.clocks.white = room.timeControl.initial * 1000;
   room.clocks.black = room.timeControl.initial * 1000;
   room.clocks.activeSince = null;
@@ -30,6 +28,7 @@ function startGame(room) {
 
 function endGame(room, { winner, reason }) {
   if (room.game.status === 'finished') return false;
+  const timer = require('../services/timerService');
   timer.commitElapsed(room);
   room.game.status = 'finished';
   room.game.result = { winner, reason };
@@ -144,7 +143,7 @@ function handleTimeout(room) {
 }
 
 module.exports = {
-  newGame, startGame, endGame, applyMove, resign,
+  create, start, endGame, applyMove, resign,
   offerDraw, respondDraw, claimDraw, handleTimeout,
   canClaimDraw
 };

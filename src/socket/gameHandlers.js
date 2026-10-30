@@ -1,5 +1,5 @@
 const roomService = require('../services/roomService');
-const gameService = require('../services/gameService');
+const { getEngine } = require('../games');
 const validation = require('../middleware/validation');
 const rateLimit = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
@@ -15,20 +15,53 @@ function toApp(err, map) {
 }
 
 module.exports = function gameHandlers(io, socket) {
+  socket.on('room:chat', (payload, ack) => {
+    try {
+      rateLimit.check(socket, 'room:chat');
+      const ctx = roomService.getContext(socket.id);
+      if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
+      
+      const text = payload && typeof payload.text === 'string' ? payload.text.trim() : '';
+      if (!text || text.length > 100) throw new AppError('INVALID_MSG', 'Message must be 1-100 chars');
+
+      let name = 'Unknown';
+      if (ctx.seat === 'white') name = ctx.room.players.white.name;
+      else if (ctx.seat === 'black') name = ctx.room.players.black.name;
+      else if (ctx.seat === 'spectator') name = ctx.room.spectators.get(socket.id).name;
+
+      io.to(ctx.room.code).emit('room:chatMessage', {
+        name,
+        seat: ctx.seat,
+        text,
+        time: Date.now()
+      });
+
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      if (err instanceof AppError) sendErr(ack, err);
+      else { logger.error('room:chat failed', err); sendErr(ack, { message: 'Internal error' }); }
+    }
+  });
+
   socket.on('game:legalMoves', (payload, ack) => {
     try {
       rateLimit.check(socket, 'game:legalMoves');
-      if (!payload || typeof payload.from !== 'string' || !/^[a-h][1-8]$/.test(payload.from)) {
-        throw new AppError('INVALID_SQUARE', 'Invalid square');
-      }
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       const { room, seat } = ctx;
+      
+      if (room.gameType !== 'chess') return ack({ ok: true, moves: [] });
+
+      if (!payload || typeof payload.from !== 'string' || !/^[a-h][1-8]$/.test(payload.from)) {
+        throw new AppError('INVALID_SQUARE', 'Invalid square');
+      }
+      
       if (seat === 'spectator' || room.game.status !== 'active') {
         return ack({ ok: true, moves: [] });
       }
       const myColor = seat === 'white' ? 'w' : 'b';
       if (room.game.chess.turn() !== myColor) return ack({ ok: true, moves: [] });
+      
       const moves = room.game.chess.moves({ square: payload.from, verbose: true });
       ack({ ok: true, moves: moves.map(m => m.to) });
     } catch (err) {
@@ -40,24 +73,34 @@ module.exports = function gameHandlers(io, socket) {
   socket.on('game:move', (payload, ack) => {
     try {
       rateLimit.check(socket, 'game:move');
-      const move = validation.validateMove(payload);
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       const { room, seat } = ctx;
       if (seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot move');
       if (room.game.status !== 'active') throw new AppError('GAME_NOT_ACTIVE', 'Game is not active');
 
-      if (room.moveRequests.has(move.requestId)) {
-        return ack({ ok: true, duplicate: true });
-      }
-      room.moveRequests.set(move.requestId, Date.now());
-      if (room.moveRequests.size > 200) {
-        const cutoff = Date.now() - 60_000;
-        for (const [k, t] of room.moveRequests) if (t < cutoff) room.moveRequests.delete(k);
+      const engine = getEngine(room.gameType);
+      
+      let movePayload;
+      if (room.gameType === 'chess') {
+        movePayload = validation.validateMove(payload);
+        if (room.moveRequests.has(movePayload.requestId)) {
+          return ack({ ok: true, duplicate: true });
+        }
+        room.moveRequests.set(movePayload.requestId, Date.now());
+        if (room.moveRequests.size > 200) {
+          const cutoff = Date.now() - 60_000;
+          for (const [k, t] of room.moveRequests) if (t < cutoff) room.moveRequests.delete(k);
+        }
+      } else if (room.gameType === 'tictactoe') {
+        movePayload = { index: parseInt(payload.index, 10) };
+        if (isNaN(movePayload.index)) throw new AppError('INVALID_MOVE', 'Invalid index');
+      } else {
+        throw new AppError('INVALID_GAME', 'Unknown game type');
       }
 
       try {
-        gameService.applyMove(room, seat, move);
+        engine.applyMove(room, seat, movePayload);
       } catch (e) {
         toApp(e, {
           ILLEGAL_MOVE: ['ILLEGAL_MOVE', 'Illegal move'],
@@ -80,8 +123,10 @@ module.exports = function gameHandlers(io, socket) {
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot resign');
+      
+      const engine = getEngine(ctx.room.gameType);
       try {
-        gameService.resign(ctx.room, ctx.seat);
+        engine.resign(ctx.room, ctx.seat);
       } catch (e) {
         toApp(e, { GAME_NOT_ACTIVE: ['GAME_NOT_ACTIVE', 'Game is not active'] });
       }
@@ -99,12 +144,15 @@ module.exports = function gameHandlers(io, socket) {
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot offer a draw');
+      
+      const engine = getEngine(ctx.room.gameType);
       try {
-        gameService.offerDraw(ctx.room, ctx.seat);
+        engine.offerDraw(ctx.room, ctx.seat);
       } catch (e) {
         toApp(e, { GAME_NOT_ACTIVE: ['GAME_NOT_ACTIVE', 'Game is not active'] });
       }
       roomService.broadcastState(io, ctx.room);
+      
       const opponentSeat = ctx.seat === 'white' ? 'black' : 'white';
       const opp = ctx.room.players[opponentSeat];
       if (opp && opp.socketId) {
@@ -114,7 +162,7 @@ module.exports = function gameHandlers(io, socket) {
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
-      else { logger.error('game:offerDraw failed', err); sendErr(ack, { message: 'Internal error' }); }
+      else sendErr(ack, { message: 'Internal error' });
     }
   });
 
@@ -125,8 +173,10 @@ module.exports = function gameHandlers(io, socket) {
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot respond');
+      
+      const engine = getEngine(ctx.room.gameType);
       try {
-        gameService.respondDraw(ctx.room, ctx.seat, accept);
+        engine.respondDraw(ctx.room, ctx.seat, accept);
       } catch (e) {
         toApp(e, {
           NO_DRAW_OFFER: ['NO_DRAW_OFFER', 'No draw offer pending'],
@@ -137,7 +187,7 @@ module.exports = function gameHandlers(io, socket) {
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
-      else { logger.error('game:respondDraw failed', err); sendErr(ack, { message: 'Internal error' }); }
+      else sendErr(ack, { message: 'Internal error' });
     }
   });
 
@@ -148,9 +198,11 @@ module.exports = function gameHandlers(io, socket) {
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot claim');
 
+      const engine = getEngine(ctx.room.gameType);
       let claimed;
       try {
-        claimed = gameService.claimDraw(ctx.room, ctx.seat);
+        if (!engine.claimDraw) throw new Error('NO_CLAIM');
+        claimed = engine.claimDraw(ctx.room, ctx.seat);
       } catch (e) {
         toApp(e, { GAME_NOT_ACTIVE: ['GAME_NOT_ACTIVE', 'Game is not active'] });
       }
@@ -160,7 +212,7 @@ module.exports = function gameHandlers(io, socket) {
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
-      else { logger.error('game:claimDraw failed', err); sendErr(ack, { message: 'Internal error' }); }
+      else sendErr(ack, { message: 'Internal error' });
     }
   });
 
@@ -170,6 +222,7 @@ module.exports = function gameHandlers(io, socket) {
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot rematch');
+      
       const bothReady = roomService.voteRematch(ctx.room, ctx.seat);
       if (bothReady) {
         roomService.resetForRematch(ctx.room);
@@ -187,6 +240,7 @@ module.exports = function gameHandlers(io, socket) {
       rateLimit.check(socket, 'default');
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
+      
       roomService.declineRematch(ctx.room, ctx.seat);
       roomService.broadcastState(io, ctx.room);
       if (typeof ack === 'function') ack({ ok: true });

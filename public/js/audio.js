@@ -1,4 +1,9 @@
 let audioCtx = null;
+let isMuted = false;
+
+try {
+  isMuted = localStorage.getItem('chess-muted') === 'true';
+} catch (_) {}
 
 function initAudio() {
   if (!audioCtx) {
@@ -10,7 +15,7 @@ function initAudio() {
 }
 
 function playTone(freq, type, duration, vol) {
-  if (!audioCtx) return;
+  if (isMuted || !audioCtx) return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
@@ -47,8 +52,25 @@ export const sounds = {
   select() {
     initAudio();
     playTone(500, 'sine', 0.05, 0.08);
+  },
+  chat() {
+    initAudio();
+    playTone(800, 'sine', 0.08, 0.15);
+    setTimeout(() => playTone(1000, 'sine', 0.1, 0.15), 80);
   }
 };
+
+export function toggleMute() {
+  isMuted = !isMuted;
+  try {
+    localStorage.setItem('chess-muted', isMuted ? 'true' : 'false');
+  } catch (_) {}
+  return isMuted;
+}
+
+export function getIsMuted() {
+  return isMuted;
+}
 
 window.addEventListener('pointerdown', () => {
   if (!audioCtx) initAudio();

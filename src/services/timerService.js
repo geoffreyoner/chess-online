@@ -1,6 +1,3 @@
-/**
- * Server-authoritative clock helpers. All times are in milliseconds.
- */
 function getCurrentClocks(room) {
   const { white, black, activeSince, activeColor } = room.clocks;
   if (activeSince == null || !activeColor) {
@@ -28,7 +25,7 @@ function commitElapsed(room) {
 }
 
 function startClock(room, color) {
-  if (room.timeControl.initial === 0) return; // unlimited
+  if (room.timeControl.initial === 0) return;
   room.clocks.activeColor = color;
   room.clocks.activeSince = Date.now();
 }
