@@ -1,9 +1,9 @@
 const roomService = require('../services/roomService');
-const { getEngine } = require('../games');
 const validation = require('../middleware/validation');
 const rateLimit = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
 const { AppError } = require('../utils/errors');
+const { getEngine } = require('../games');
 
 function sendErr(ack, err) {
   if (typeof ack === 'function') ack({ ok: false, error: err.message, code: err.code || 'ERROR' });
@@ -95,6 +95,9 @@ module.exports = function gameHandlers(io, socket) {
       } else if (room.gameType === 'tictactoe') {
         movePayload = { index: parseInt(payload.index, 10) };
         if (isNaN(movePayload.index)) throw new AppError('INVALID_MOVE', 'Invalid index');
+      } else if (room.gameType === 'connectfour') {
+        movePayload = { column: parseInt(payload.column, 10) };
+        if (isNaN(movePayload.column)) throw new AppError('INVALID_MOVE', 'Invalid column');
       } else {
         throw new AppError('INVALID_GAME', 'Unknown game type');
       }

@@ -68,10 +68,24 @@ export function initGame() {
 
   document.querySelectorAll('.quick-chat-grid button').forEach(btn => {
     btn.addEventListener('click', () => {
-      const msg = btn.dataset.msg;
-      getSocket().emit('room:chat', { text: msg });
+      if (!current) { toast('Join a room first', 'warning', 1500); return; }
+      const text = btn.dataset.msg;
+      if (!text) return;
+      getSocket().emit('room:chat', { text }, (res) => {
+        if (!res || !res.ok) toast((res && res.error) || 'Message failed', 'error');
+      });
     });
   });
+
+  const tttBoard = document.getElementById('board-tictactoe');
+  if (tttBoard) tttBoard.addEventListener('click', onTicTacToeClick);
+
+  const c4Board = document.getElementById('board-connectfour');
+  if (c4Board) {
+    c4Board.addEventListener('click', onConnectFourClick);
+    c4Board.addEventListener('mouseover', onConnectFourHover);
+    c4Board.addEventListener('mouseleave', clearColumnHighlight);
+  }
 
   window.addEventListener('board:flip', () => {
     if (current) {
@@ -139,9 +153,8 @@ function onStateUpdate(snapshot) {
   if (current) {
     if (current.mySeat !== snapshot.mySeat && snapshot.mySeat !== 'spectator') {
       let label = snapshot.mySeat === 'white' ? 'White' : 'Black';
-      if (snapshot.gameType === 'tictactoe') {
-        label = snapshot.mySeat === 'white' ? 'X' : 'O';
-      }
+      if (snapshot.gameType === 'tictactoe') label = snapshot.mySeat === 'white' ? 'X' : 'O';
+      if (snapshot.gameType === 'connectfour') label = snapshot.mySeat === 'white' ? 'Red' : 'Yellow';
       toast(`Sides swapped! You are now ${label}`, 'info', 4000);
     }
 
@@ -152,7 +165,7 @@ function onStateUpdate(snapshot) {
       const lastMv = snapshot.game.history[newLength - 1];
       if (snapshot.game.status === 'finished') {
          sounds.end();
-      } else if (snapshot.gameType === 'tictactoe') {
+      } else if (snapshot.gameType !== 'chess') {
          sounds.select();
       } else if (snapshot.game.check) {
          sounds.check();
@@ -171,16 +184,23 @@ function onStateUpdate(snapshot) {
   
   const chessBoard = document.getElementById('board-chess');
   const tttBoard = document.getElementById('board-tictactoe');
+  const c4Board = document.getElementById('board-connectfour');
   const btnFlip = document.getElementById('btn-flip');
 
+  if (chessBoard) chessBoard.style.display = 'none';
+  if (tttBoard) tttBoard.style.display = 'none';
+  if (c4Board) c4Board.style.display = 'none';
+
   if (snapshot.gameType === 'tictactoe') {
-    if (chessBoard) chessBoard.style.display = 'none';
     if (tttBoard) tttBoard.style.display = 'grid';
     if (btnFlip) btnFlip.style.display = 'none';
     renderTicTacToe(snapshot);
+  } else if (snapshot.gameType === 'connectfour') {
+    if (c4Board) c4Board.style.display = 'grid';
+    if (btnFlip) btnFlip.style.display = 'none';
+    renderConnectFour(snapshot);
   } else {
     if (chessBoard) chessBoard.style.display = 'grid';
-    if (tttBoard) tttBoard.style.display = 'none';
     if (btnFlip) btnFlip.style.display = 'block';
     setBoardState(snapshot);
   }
@@ -189,34 +209,118 @@ function onStateUpdate(snapshot) {
 function renderTicTacToe(snapshot) {
   const container = document.getElementById('board-tictactoe');
   if (!container) return;
+  
+  if (snapshot.game.status === 'waiting') container.classList.add('waiting');
+  else container.classList.remove('waiting');
+
   container.innerHTML = '';
   const board = snapshot.game.board || Array(9).fill(null);
-  
+  const last = snapshot.game.lastMove;
+
   board.forEach((cell, index) => {
     const div = document.createElement('div');
     div.className = 'ttt-cell';
+    div.dataset.index = String(index);
     if (cell === 'X') div.classList.add('x');
     if (cell === 'O') div.classList.add('o');
-    if (snapshot.game.lastMove && snapshot.game.lastMove.index === index) div.classList.add('last-move');
+    if (last && last.index === index) div.classList.add('last-move');
     div.textContent = cell || '';
-    
-    div.addEventListener('click', () => {
-      if (snapshot.game.status !== 'active') return;
-      if (snapshot.mySeat === 'spectator') return;
-      
-      const mySym = snapshot.mySeat === 'white' ? 'X' : 'O';
-      if (snapshot.game.turn !== mySym) return;
-      if (cell !== null) return;
-      
-      getSocket().emit('game:move', { index }, (res) => {
-        if (!res || !res.ok) {
-          toast((res && res.error) || 'Move rejected', 'error');
-        }
-      });
-    });
-    
     container.appendChild(div);
   });
+}
+
+function onTicTacToeClick(e) {
+  const cellEl = e.target.closest('.ttt-cell');
+  if (!cellEl || !current || current.gameType !== 'tictactoe') return;
+
+  const g = current.game;
+  if (g.status !== 'active') return;
+  if (current.mySeat !== 'white' && current.mySeat !== 'black') return;
+
+  const mySym = current.mySeat === 'white' ? 'X' : 'O';
+  if (g.turn !== mySym) {
+    toast("It's not your turn", 'warning', 1200);
+    return;
+  }
+
+  const index = Number(cellEl.dataset.index);
+  if (!Number.isInteger(index) || g.board[index] !== null) return;
+
+  getSocket().emit('game:move', { index }, (res) => {
+    if (!res || !res.ok) toast((res && res.error) || 'Move rejected', 'error');
+  });
+}
+
+function renderConnectFour(snapshot) {
+  const container = document.getElementById('board-connectfour');
+  if (!container) return;
+
+  if (snapshot.game.status === 'waiting') container.classList.add('waiting');
+  else container.classList.remove('waiting');
+
+  container.innerHTML = '';
+  const board = snapshot.game.board || [];
+  const last = snapshot.game.lastMove;
+
+  for (let r = 0; r < 6; r++) {
+    for (let c = 0; c < 7; c++) {
+      const div = document.createElement('div');
+      div.className = 'c4-cell';
+      div.dataset.col = String(c);
+      
+      if (board[r] && board[r][c]) {
+        const cell = board[r][c];
+        if (cell === 'R') div.classList.add('r');
+        if (cell === 'Y') div.classList.add('y');
+        if (last && last.row === r && last.col === c) {
+          div.classList.add('last-move');
+          if (snapshot.game.history.length > 0) {
+            div.classList.add('animate-drop');
+          }
+        }
+      }
+      container.appendChild(div);
+    }
+  }
+}
+
+function onConnectFourClick(e) {
+  const cellEl = e.target.closest('.c4-cell');
+  if (!cellEl || !current || current.gameType !== 'connectfour') return;
+
+  const g = current.game;
+  if (g.status !== 'active') return;
+  if (current.mySeat !== 'white' && current.mySeat !== 'black') return;
+
+  const mySym = current.mySeat === 'white' ? 'R' : 'Y';
+  if (g.turn !== mySym) {
+    toast("It's not your turn", 'warning', 1200);
+    return;
+  }
+
+  const col = Number(cellEl.dataset.col);
+  if (!Number.isInteger(col)) return;
+
+  getSocket().emit('game:move', { column: col }, (res) => {
+    if (!res || !res.ok) toast((res && res.error) || 'Move rejected', 'error');
+  });
+}
+
+function onConnectFourHover(e) {
+  const cellEl = e.target.closest('.c4-cell');
+  if (!cellEl || !current || current.gameType !== 'connectfour' || current.game.status !== 'active') return;
+  
+  const col = Number(cellEl.dataset.col);
+  if (!Number.isInteger(col)) return;
+
+  document.querySelectorAll('.c4-cell').forEach(c => c.classList.remove('col-hover'));
+  document.querySelectorAll(`.c4-cell[data-col="${col}"]`).forEach(c => {
+    c.classList.add('col-hover');
+  });
+}
+
+function clearColumnHighlight() {
+  document.querySelectorAll('.c4-cell').forEach(c => c.classList.remove('col-hover'));
 }
 
 function renderAll() {
@@ -294,8 +398,10 @@ function setBar(barId, player, color) {
   const seatEl = bar.querySelector('[data-seat]');
   const dot = bar.querySelector('.player-dot');
   nameEl.textContent = player ? player.name : '—';
+  
   let seatText = color === 'white' ? 'White' : 'Black';
   if (current.gameType === 'tictactoe') seatText = color === 'white' ? 'X' : 'O';
+  if (current.gameType === 'connectfour') seatText = color === 'white' ? 'Red' : 'Yellow';
   
   if (player && !player.connected) seatText += ' · offline';
   seatEl.textContent = seatText;
@@ -325,6 +431,16 @@ function updateStatus() {
       } else {
         msg = "Opponent's move";
       }
+    } else if (current.gameType === 'connectfour') {
+      const mySym = current.mySeat === 'white' ? 'R' : 'Y';
+      if (current.mySeat !== 'spectator' && g.turn === mySym) {
+        msg = 'Your move — click a column';
+        banner.classList.add('turn-me');
+      } else if (current.mySeat === 'spectator') {
+        msg = (g.turn === 'R' ? 'Red' : 'Yellow') + ' to move';
+      } else {
+        msg = "Opponent's move";
+      }
     } else {
       const myColor = current.mySeat === 'white' ? 'w' : current.mySeat === 'black' ? 'b' : null;
       if (myColor && g.turn === myColor) {
@@ -337,8 +453,8 @@ function updateStatus() {
       }
     }
     
-    if (current.drawOffer) {
-      msg = (current.drawOffer.by === current.mySeat) ? 'Draw offer sent…' : 'Draw offer pending';
+    if (g.drawOffer) {
+      msg = (g.drawOffer.by === current.mySeat) ? 'Draw offer sent…' : 'Draw offer pending';
     }
   } else if (g.status === 'finished') {
     banner.classList.add('ended');
@@ -352,9 +468,13 @@ function describeResult(result, s) {
   const w = result.winner;
   const r = result.reason;
   
-  if (s.gameType === 'tictactoe') {
+  if (s.gameType === 'tictactoe' || s.gameType === 'connectfour') {
+    const isTTT = s.gameType === 'tictactoe';
+    const sym1 = isTTT ? 'X' : 'Red';
+    const sym2 = isTTT ? 'O' : 'Yellow';
+    
     if (r === 'line') {
-      const winnerSymbol = w === 'w' ? 'X' : 'O';
+      const winnerSymbol = w === 'w' ? sym1 : sym2;
       const winnerName = w === 'w' ? s.players.white?.name : s.players.black?.name;
       return `${winnerName || winnerSymbol} wins!`;
     }
@@ -367,6 +487,11 @@ function describeResult(result, s) {
       const winnerName = w === 'w' ? s.players.white?.name : s.players.black?.name;
       return `${winnerName} wins on time`;
     }
+    if (r === 'abandonment') {
+      const winnerName = w === 'w' ? s.players.white?.name : s.players.black?.name;
+      return `${winnerName} wins — opponent abandoned`;
+    }
+    if (r === 'agreement') return 'Draw by agreement';
     return 'Game over';
   }
   
@@ -408,6 +533,15 @@ function updateControls() {
   
   btnClaim.hidden = !(isPlayer && active && current.game.canClaimDraw);
   btnClaim.disabled = false;
+
+  const btnPgn = document.getElementById('btn-export-pgn');
+  if (btnPgn) btnPgn.hidden = current.gameType !== 'chess';
+
+  const offer = current.game.drawOffer;
+  const drawModal = document.getElementById('modal-draw');
+  if (drawModal) {
+    drawModal.hidden = !(isPlayer && active && offer && offer.by !== current.mySeat);
+  }
 }
 
 function handleResign() {
@@ -465,8 +599,16 @@ function handleExportPgn() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function resetChat() {
+  const box = document.getElementById('chat-messages');
+  if (!box) return;
+  box.textContent = '';
+  appendSysChat('Welcome to the room!');
+}
+
 function leaveToLobby(removeToken) {
   stopClockTicker();
+  resetChat();
   if (removeToken) {
     try { sessionStorage.removeItem('reconnect'); } catch (_) {}
   }
