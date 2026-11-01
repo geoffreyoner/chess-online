@@ -43,15 +43,12 @@ function validateTimeControl(tc) {
 
 function validateCreateRoom(payload) {
   if (!payload || typeof payload !== 'object') throw new AppError('INVALID_PAYLOAD', 'Invalid payload');
- 
-  const gameType = ['chess', 'tictactoe', 'connectfour'].includes(payload.gameType) 
-    ? payload.gameType 
-    : 'chess';
-    
+  const gameType = ['chess', 'tictactoe', 'connectfour'].includes(payload.gameType) ? payload.gameType : 'chess';
   return {
     name: validateName(payload.name),
     timeControl: validateTimeControl(payload.timeControl),
-    gameType
+    gameType,
+    vsBot: payload.vsBot === true
   };
 }
 

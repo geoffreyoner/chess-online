@@ -5,16 +5,17 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
- 	 "start": "node src/server.js",
-	 "dev": "node --watch src/server.js",
- 	 "test": "node --test tests/*.test.js",
- 	 "structure": "node scripts/generate-structure.js"
-},
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test tests/*.test.js",
+    "structure": "node scripts/generate-structure.js"
+  },
   "engines": { "node": ">=18.0.0" },
   "dependencies": {
     "chess.js": "0.13.4",
     "dotenv": "16.4.5",
-    "express": "4.22.3",
+    "express": "4.21.2",
+    "js-chess-engine": "^1.0.2",
     "socket.io": "4.8.1"
   },
   "devDependencies": {

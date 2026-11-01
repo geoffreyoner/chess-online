@@ -69,6 +69,7 @@ export function initGame() {
   document.querySelectorAll('.quick-chat-grid button').forEach(btn => {
     btn.addEventListener('click', () => {
       if (!current) { toast('Join a room first', 'warning', 1500); return; }
+      if (current.players.white?.name === 'Computer' || current.players.black?.name === 'Computer') return;
       const text = btn.dataset.msg;
       if (!text) return;
       getSocket().emit('room:chat', { text }, (res) => {
@@ -180,11 +181,6 @@ function onStateUpdate(snapshot) {
   current = snapshot;
   localOrientation = getOrientation();
   showGame();
-  
-		if (typeof clearColumnHighlight === 'function') {
-  		clearColumnHighlight();
-	}
-	
   renderAll();
   
   const chessBoard = document.getElementById('board-chess');
@@ -402,7 +398,14 @@ function setBar(barId, player, color) {
   const nameEl = bar.querySelector('[data-name]');
   const seatEl = bar.querySelector('[data-seat]');
   const dot = bar.querySelector('.player-dot');
-  nameEl.textContent = player ? player.name : '—';
+  
+  if (player) {
+    let displayName = player.name;
+    if (player.name === 'Computer') displayName = 'Computer (Bot)';
+    nameEl.textContent = displayName;
+  } else {
+    nameEl.textContent = '—';
+  }
   
   let seatText = color === 'white' ? 'White' : 'Black';
   if (current.gameType === 'tictactoe') seatText = color === 'white' ? 'X' : 'O';
@@ -519,6 +522,7 @@ function describeResult(result, s) {
 function updateControls() {
   if (!current) return;
   const isPlayer = current.mySeat === 'white' || current.mySeat === 'black';
+  const isVsBot = current.players.white?.name === 'Computer' || current.players.black?.name === 'Computer';
   const active = current.game.status === 'active';
   const finished = current.game.status === 'finished';
   const btnResign = document.getElementById('btn-resign');
@@ -527,6 +531,7 @@ function updateControls() {
   const btnClaim = document.getElementById('btn-claim-draw');
 
   btnResign.disabled = !isPlayer || !active;
+  btnDraw.hidden = isVsBot;
   btnDraw.disabled = !isPlayer || !active || !!current.game.drawOffer;
   
   btnRematch.hidden = !(isPlayer && finished);
@@ -546,6 +551,11 @@ function updateControls() {
   const drawModal = document.getElementById('modal-draw');
   if (drawModal) {
     drawModal.hidden = !(isPlayer && active && offer && offer.by !== current.mySeat);
+  }
+
+  const chatSection = document.querySelector('.chat-section');
+  if (chatSection) {
+    chatSection.style.display = isVsBot ? 'none' : 'flex';
   }
 }
 

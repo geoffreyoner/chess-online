@@ -117,6 +117,9 @@ function handleCreate(e) {
     ? activeGame.dataset.value
     : selectedGameType;
 
+  const vsBotCheckbox = document.getElementById('create-vs-bot');
+  const vsBot = vsBotCheckbox ? vsBotCheckbox.checked : false;
+
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Creating…';
@@ -138,8 +141,11 @@ function handleCreate(e) {
   const payload = {
     name,
     timeControl: { initial: selectedTC, increment: selectedInc },
-    gameType
+    gameType,
+    vsBot
   };
+
+  console.log('[CreateRoom] Sending payload:', payload);
 
   try {
     socket.emit('room:create', payload, (res) => {

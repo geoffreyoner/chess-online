@@ -20,6 +20,7 @@ module.exports = function gameHandlers(io, socket) {
       rateLimit.check(socket, 'room:chat');
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
+      if (ctx.room.botSeat) throw new AppError('FORBIDDEN', 'Chat disabled in bot games');
       
       const text = payload && typeof payload.text === 'string' ? payload.text.trim() : '';
       if (!text || text.length > 100) throw new AppError('INVALID_MSG', 'Message must be 1-100 chars');
@@ -113,7 +114,11 @@ module.exports = function gameHandlers(io, socket) {
       }
 
       roomService.broadcastState(io, room);
-      ack({ ok: true });
+      if (typeof ack === 'function') ack({ ok: true });
+
+      if (room.botSeat && room.game.status === 'active') {
+        require('../services/botService').makeMove(io, room);
+      }
     } catch (err) {
       if (err instanceof AppError) sendErr(ack, err);
       else { logger.error('game:move failed', err); sendErr(ack, { message: 'Internal error' }); }
@@ -147,6 +152,7 @@ module.exports = function gameHandlers(io, socket) {
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot offer a draw');
+      if (ctx.room.botSeat) throw new AppError('FORBIDDEN', 'Cannot offer draw to bot');
       
       const engine = getEngine(ctx.room.gameType);
       try {
@@ -225,7 +231,12 @@ module.exports = function gameHandlers(io, socket) {
       const ctx = roomService.getContext(socket.id);
       if (!ctx) throw new AppError('NOT_IN_ROOM', 'Not in a room');
       if (ctx.seat === 'spectator') throw new AppError('FORBIDDEN', 'Spectators cannot rematch');
-      
+      if (ctx.room.botSeat) {
+        roomService.resetForRematch(ctx.room);
+        roomService.broadcastState(io, ctx.room);
+        return ack({ ok: true, bothReady: true });
+      }
+
       const bothReady = roomService.voteRematch(ctx.room, ctx.seat);
       if (bothReady) {
         roomService.resetForRematch(ctx.room);

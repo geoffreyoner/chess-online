@@ -13,8 +13,8 @@ module.exports = function roomHandlers(io, socket) {
   socket.on('room:create', (payload, ack) => {
     try {
       rateLimit.check(socket, 'room:create');
-      const { name, timeControl, gameType } = validation.validateCreateRoom(payload);
-      const { room, token } = roomService.createRoom({ name, timeControl, gameType, socketId: socket.id });
+      const { name, timeControl, gameType, vsBot } = validation.validateCreateRoom(payload);
+      const { room, token } = roomService.createRoom({ name, timeControl, gameType, vsBot, socketId: socket.id });      
       socket.join(room.code);
       roomService.broadcastState(io, room);
       if (typeof ack === 'function') {

@@ -17,7 +17,9 @@ function generateUniqueCode() {
   throw new AppError('CODE_GEN_FAILED', 'Could not generate unique room code');
 }
 
-function createRoom({ name, timeControl, gameType = 'chess', socketId }) {
+function createRoom({ name, timeControl, gameType = 'chess', vsBot = false, socketId }) {
+  console.log(`[RoomService] Creating room. gameType: ${gameType}, vsBot: ${vsBot}`); // TAMBAHKAN INI
+  
   const code = generateUniqueCode();
   const token = generateToken();
   const tokenHash = hashToken(token);
@@ -32,6 +34,7 @@ function createRoom({ name, timeControl, gameType = 'chess', socketId }) {
       white: { name, tokenHash, socketId, connected: true },
       black: null
     },
+    botSeat: null,
     spectators: new Map(),
     game: engine.create(),
     timeControl: { initial: timeControl.initial, increment: timeControl.increment },
@@ -46,6 +49,13 @@ function createRoom({ name, timeControl, gameType = 'chess', socketId }) {
     moveRequests: new Map()
   };
 
+  if (vsBot) {
+    console.log('[RoomService] Bot detected! Initializing bot seat...'); // TAMBAHKAN INI
+    room.botSeat = 'black';
+    room.players.black = { name: 'Computer', tokenHash: 'bot-hash', socketId: null, connected: true };
+    engine.start(room);
+  }
+
   rooms.set(code, room);
   socketToRoom.set(socketId, code);
   tokenInfo.set(tokenHash, { roomCode: code, seat: 'white', name });
@@ -57,6 +67,7 @@ function joinRoom({ name, roomCode, socketId }) {
   const room = rooms.get(roomCode);
   if (!room) throw new AppError('ROOM_NOT_FOUND', 'Room not found');
   if (socketToRoom.has(socketId)) throw new AppError('ALREADY_IN_ROOM', 'Already in a room');
+  if (room.botSeat) throw new AppError('ROOM_FULL', 'Cannot join a bot room');
 
   let seat, token = null;
 
@@ -229,6 +240,12 @@ function declineRematch(room, seat) {
 }
 
 function resetForRematch(room) {
+  if (room.botSeat) {
+    const engine = getEngine(room.gameType);
+    engine.start(room);
+    return;
+  }
+
   if (room.players.white && room.players.black) {
     const oldWhite = room.players.white;
     const oldBlack = room.players.black;
@@ -250,12 +267,12 @@ function cleanup() {
   for (const [code, room] of rooms) {
     const hasActivePlayer =
       (room.players.white && room.players.white.connected) ||
-      (room.players.black && room.players.black.connected);
+      (room.players.black && room.players.black.connected && !room.botSeat);
     const hasSpectators = room.spectators.size > 0;
     if (!hasActivePlayer && !hasSpectators && now - room.lastActivity > config.emptyRoomTtlMs) {
       for (const seat of ['white', 'black']) {
         const p = room.players[seat];
-        if (p && p.tokenHash) tokenInfo.delete(p.tokenHash);
+        if (p && p.tokenHash && p.tokenHash !== 'bot-hash') tokenInfo.delete(p.tokenHash);
       }
       for (const t of Object.values(room.disconnectTimers)) clearTimeout(t);
       rooms.delete(code);
