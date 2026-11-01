@@ -180,6 +180,11 @@ function onStateUpdate(snapshot) {
   current = snapshot;
   localOrientation = getOrientation();
   showGame();
+  
+		if (typeof clearColumnHighlight === 'function') {
+  		clearColumnHighlight();
+	}
+	
   renderAll();
   
   const chessBoard = document.getElementById('board-chess');

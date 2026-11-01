@@ -20,6 +20,15 @@ let initialized = false;
 
 let pieceElements = {}; 
 
+let isDragging = false;
+let dragStartSquare = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragOffsetX = 0; // Jarak jari ke kiri bidak
+let dragOffsetY = 0; // Jarak jari ke atas bidak
+let dragEl = null;
+let dragHasMoved = false;
+
 export function getOrientation() { return orientation; }
 
 export function initBoard() {
@@ -39,7 +48,7 @@ export function initBoard() {
   piecesLayer.className = 'pieces-layer';
   boardEl.appendChild(piecesLayer);
   
-  squaresLayer.addEventListener('click', handleClick);
+  boardEl.addEventListener('pointerdown', handlePointerDown);
   
   const btnFlip = document.getElementById('btn-flip');
   if (btnFlip) btnFlip.addEventListener('click', flipBoard);
@@ -50,8 +59,10 @@ export function setBoardState(snapshot) {
   const newSeat = snapshot.mySeat;
   const isNewGame = snapshot.game.history.length === 0;
   
-  selectedSquare = null;
-  legalTargets = [];
+  if (!isDragging) {
+    selectedSquare = null;
+    legalTargets = [];
+  }
 
   if (!initialized) {
     if (newSeat === 'black') orientation = 'black';
@@ -76,6 +87,7 @@ export function setBoardState(snapshot) {
 }
 
 function flipBoard() {
+  if (isDragging) return;
   orientation = orientation === 'white' ? 'black' : 'white';
   renderSquares();
   for (const sq in pieceElements) {
@@ -108,6 +120,24 @@ function coordToSquare(file, rank) {
 function colorOf(piece) {
   if (!piece) return null;
   return piece === piece.toUpperCase() ? 'w' : 'b';
+}
+
+function getSquareFromPoint(clientX, clientY) {
+  const rect = boardEl.getBoundingClientRect();
+  let x = clientX - rect.left;
+  let y = clientY - rect.top;
+  
+  if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) return null;
+  
+  let file = Math.floor((x / rect.width) * 8);
+  let rank = Math.floor((y / rect.height) * 8);
+  
+  if (orientation === 'black') {
+    file = 7 - file;
+    rank = 7 - rank;
+  }
+  
+  return coordToSquare(file, rank);
 }
 
 function renderSquares() {
@@ -159,7 +189,7 @@ function renderPieces() {
   const boardArr = parseFen(currentFen);
   const isNewGame = !lastMove || Object.keys(pieceElements).length === 0;
   
-  if (!isNewGame && lastMove) {
+  if (!isNewGame && lastMove && !isDragging) {
     const movingEl = pieceElements[lastMove.from];
     
     if (movingEl) {
@@ -232,14 +262,19 @@ function renderPieces() {
     }
   }
   
-  for (const sq in pieceElements) {
-    fadeOutPiece(pieceElements[sq]);
+  for (const el of piecesLayer.children) {
+    if (el === dragEl && isDragging) continue;
+    if (!Object.values(newPieceElements).includes(el)) {
+      el.remove();
+    }
   }
   
   pieceElements = newPieceElements;
 }
 
 function updatePiecePos(el, sq, instant = false) {
+  if (el === dragEl && isDragging) return;
+
   const { file, rank } = squareToCoord(sq);
   let f = file, r = rank;
   if (orientation === 'black') {
@@ -260,37 +295,11 @@ function fadeOutPiece(el) {
   setTimeout(() => el.remove(), 200);
 }
 
-function handleClick(e) {
-  const sq = e.target.closest('.square');
-  if (!sq) return;
-  const square = sq.dataset.square;
-  if (!interactive) return;
-  if (mySeat === 'spectator') return;
-
-  if (selectedSquare && legalTargets.includes(square)) {
-    const from = selectedSquare;
-    const to = square;
-    
-    selectedSquare = null;
-    legalTargets = [];
-    renderSquares();
-
-    const board = parseFen(currentFen);
-    const { file, rank } = squareToCoord(from);
-    const piece = board[rank][file];
-    const targetRank = parseInt(to[1], 10);
-    const isPawn = piece && piece.toLowerCase() === 'p';
-    const isPromotion = isPawn && (
-      (piece === 'P' && targetRank === 8) || (piece === 'p' && targetRank === 1)
-    );
-    
-    if (isPromotion) {
-      showPromotionDialog(from, to);
-      return;
-    }
-    makeMove(from, to);
-    return;
-  }
+function handlePointerDown(e) {
+  if (!interactive || mySeat === 'spectator' || isDragging) return;
+  
+  const square = getSquareFromPoint(e.clientX, e.clientY);
+  if (!square) return;
 
   const board = parseFen(currentFen);
   const { file, rank } = squareToCoord(square);
@@ -299,24 +308,130 @@ function handleClick(e) {
   const turn = currentFen.split(' ')[1];
   const myColor = mySeat === 'white' ? 'w' : mySeat === 'black' ? 'b' : null;
 
-  if (!myColor || !piece || color !== myColor || turn !== myColor) {
-    selectedSquare = null;
-    legalTargets = [];
-    renderSquares();
+  if (selectedSquare && legalTargets.includes(square)) {
+    e.preventDefault();
+    executeMove(selectedSquare, square);
     return;
   }
 
-  selectedSquare = square;
+  if (myColor && piece && color === myColor && turn === myColor) {
+    e.preventDefault();
+    
+    if (e.pointerType === 'touch') {
+      e.target.releasePointerCapture(e.pointerId);
+    }
+
+    isDragging = true;
+    dragHasMoved = false;
+    dragStartSquare = square;
+    dragEl = pieceElements[square];
+    
+    // Simpan jarak antara jari dan sudut kiri atas bidak
+    const rect = dragEl.getBoundingClientRect();
+    dragOffsetX = e.clientX - rect.left;
+    dragOffsetY = e.clientY - rect.top;
+
+    selectedSquare = square;
+    legalTargets = [];
+    renderSquares();
+    sounds.select();
+
+    getSocket().emit('game:legalMoves', { from: square }, (res) => {
+      if (res && res.ok && selectedSquare === square) {
+        legalTargets = res.moves;
+        renderSquares();
+      }
+    });
+
+    // Pasang listener di window agar pergerakan tidak terputus
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+  } else {
+    selectedSquare = null;
+    legalTargets = [];
+    renderSquares();
+  }
+}
+
+function handlePointerMove(e) {
+  if (!isDragging || !dragEl) return;
+  e.preventDefault();
+
+  if (!dragHasMoved) {
+    dragHasMoved = true;
+    dragEl.classList.add('dragging');
+  }
+
+  const boardRect = boardEl.getBoundingClientRect();
+  const x = e.clientX - boardRect.left;
+  const y = e.clientY - boardRect.top;
+
+  // Gunakan offset jari agar bidak tidak melompat
+  dragEl.style.transform = `translate(${x - dragOffsetX}px, ${y - dragOffsetY}px)`;
+}
+
+function handlePointerUp(e) {
+  if (!isDragging) return;
+  
+  const dropSquare = getSquareFromPoint(e.clientX, e.clientY);
+  
+  if (dragHasMoved) {
+    dragEl.classList.remove('dragging');
+    isDragging = false;
+    
+    if (dropSquare && legalTargets.includes(dropSquare)) {
+      executeMove(dragStartSquare, dropSquare);
+    } else {
+      updatePiecePos(dragEl, dragStartSquare, true);
+    }
+  } else {
+    isDragging = false;
+  }
+
+  removeDragListeners();
+  dragHasMoved = false;
+  dragEl = null;
+  dragStartSquare = null;
+}
+
+function handlePointerCancel() {
+  if (isDragging && dragEl) {
+    dragEl.classList.remove('dragging');
+    isDragging = false;
+    updatePiecePos(dragEl, dragStartSquare, true);
+  }
+  removeDragListeners();
+  dragHasMoved = false;
+  dragEl = null;
+  dragStartSquare = null;
+}
+
+function removeDragListeners() {
+  window.removeEventListener('pointermove', handlePointerMove);
+  window.removeEventListener('pointerup', handlePointerUp);
+  window.removeEventListener('pointercancel', handlePointerCancel);
+}
+
+function executeMove(from, to) {
+  selectedSquare = null;
   legalTargets = [];
   renderSquares();
-  sounds.select();
 
-  getSocket().emit('game:legalMoves', { from: square }, (res) => {
-    if (res && res.ok && selectedSquare === square) {
-      legalTargets = res.moves;
-      renderSquares();
-    }
-  });
+  const board = parseFen(currentFen);
+  const { file, rank } = squareToCoord(from);
+  const piece = board[rank][file];
+  const targetRank = parseInt(to[1], 10);
+  const isPawn = piece && piece.toLowerCase() === 'p';
+  const isPromotion = isPawn && (
+    (piece === 'P' && targetRank === 8) || (piece === 'p' && targetRank === 1)
+  );
+  
+  if (isPromotion) {
+    showPromotionDialog(from, to);
+    return;
+  }
+  makeMove(from, to);
 }
 
 function showPromotionDialog(from, to) {
@@ -343,6 +458,7 @@ function makeMove(from, to, promotion) {
   getSocket().emit('game:move', { from, to, promotion, requestId }, (res) => {
     if (!res || !res.ok) {
       toast((res && res.error) || 'Move rejected', 'error');
+      renderPieces(); 
     }
   });
 }

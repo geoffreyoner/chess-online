@@ -283,3 +283,15 @@
     --board-size: min(calc(100vw - 24px), calc(100vh - 120px), 640px); 
   }
 }
+
+.piece.dragging {
+  z-index: 100 !important;
+  transition: none !important;
+  cursor: grabbing;
+  filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.5));
+  transform-origin: top left;
+}
+
+.board {
+  touch-action: none;
+}
